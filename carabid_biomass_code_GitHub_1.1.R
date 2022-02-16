@@ -1,79 +1,97 @@
 # Supplementary code to:
 
-# How to estimate carabid biomass - An evaluation of different size-weight models for ground-beetles (Coleoptera:Carabidae) and a proposition for further improvement.
+# How to estimate carabid biomass? – An valuation of size-weight models for ground beetles (Coleoptera: Carabidae) and perspectives for further improvement
 
 # submitted to Journal of Insect Conservation
 # Fabio Weiss, Andreas Linde
 # University for Sustainable Development Eberswalde, fabio.weiss@hnee.de
 
-# compiled with R version 4.1.0. 
+# compiled with R version 4.1.2. 
 
 
-## Packagelist ####
+# Packagelist
 library(lme4)
 library(DHARMa)
-library(MuMIn)
 library(sjPlot)
 library(sjmisc)
 library(sjlabelled)
 library(nlme)
 library(writexl)
+library(lmerTest)
+library(car)
+library(effects)
+library(multcomp)
 
-## Data preparation ####
-
-data <- read.csv2("compiled_data.csv")
+# load assembled table
+weight_data <- read.csv2("compiled_data.csv")
 
 # data can be found here: 
-# Schultz, R. (1996) Die Laufk�fer als Indikatoren der Renaturierung des Salzgr�nlandes im Ostseebereich Vorpommerns. Culliver-Verlag, G�ttingen.
+# Schultz, R. (1996) Die Laufkäfer als Indikatoren der Renaturierung des Salzgrünlandes im Ostseebereich Vorpommerns. Culliver-Verlag, Göttingen.
 # Booij, K., den Nijs, L., Heijermann, T., Jorritsma, I., Lock, C., Noorlander, J. (1994) Size and weight of carabid beetles: ecological applications. Proc Exper Appl Entomol.
 
-data$ln_size <- log(weights_clean$av_size_mm)
-data$ln_weight <- log(weights_clean$weight_mg)
+weight_data$ln_size <- log(weight_data$av_size_mm)
+weight_data$ln_weight <- log(weight_data$weight_mg)
 
-single_subfamily <- c("Omophroninae", "Loricerinae", "Broscinae", "Cicindelinae" )
+exclude_subfamily <- c("Omophroninae", "Loricerinae", "Broscinae", "Cicindelinae")
 
-data <- data[!(data$subfamily %in% single_subfamily) ,]
-data$subfamily <- as.factor(weights_clean2$subfamily)
+weight_data2 <- weight_data[!(weight_data$subfamily %in% exclude_subfamily) ,]
+weight_data$subfamily <- as.factor(weight_data$subfamily)
 
-data$size_section <- 1 
-data$size_section[data$av_size_mm > max(data$av_size_mm)/3]   <- 2 
-data$size_section[data$av_size_mm > max(data$av_size_mm)/3*2] <- 3 
+#figure 1
+par(mfrow= c(1,2))
+plot(weight_data$weight_mg ~ weight_data$av_size_mm, pch=20, main= "a", ylab="weight (mg)", xlab="body length (mm)", col="grey",cex.lab=1.4, cex.axis=1.1, cex=1.2)
+pred_size <- seq(min(weight_data$av_size_mm), max(weight_data$av_size_mm), length.out = 100)
+lines(pred_size, szyszko_weight(pred_size), lty="dotted", lwd=2)
+lines(pred_size, booij_weight(pred_size), lty="twodash", lwd=2)
 
-max(data$av_size_mm[data$size_section==1])
-max(data$av_size_mm)/3
-max(data$av_size_mm)/3*2
+plot(weight_data$ln_weight ~ weight_data$ln_size, pch=20, main= "b", ylab="ln(weight)", xlab="ln(body length)",col="grey",cex.lab=1.4, cex.axis=1.1, cex=1.2)
+pred_ln_size <- log(pred_size)
+lines(pred_ln_size, log(szyszko_weight(pred_size)),lty="dotted", lw=2)
+lines(pred_ln_size, log(booij_weight(pred_size)),lty="twodash", lw=2)
 
-data <- within(data, subfamily <- relevel(subfamily, ref = "Harpalinae"))
+weights_booij <- weight_data[weight_data$source_weight == "booij",]
+weights_schultz <- weight_data[weight_data$source_weight == "schultz",]
 
-## model fitting ####
+# figure 2
+par(mfrow= c(2,2))
+hist(weights_booij$av_size_mm, breaks=c(1:35), main= "Data of Booij et al. (1994), (training set)", ylim = c(0,25), xlab= "body length (mm)",cex.lab=1.4, cex.axis=1.4, cex.main=1.3)
+plot(weights_booij$av_size_mm, weights_booij$weight_mg, ylab="weight (mg)", xlab = "body length (mm)", ylim= c(0,900), xlim = c(0,35),cex.lab=1.4, cex.axis=1.4)
 
-m0<- lm(ln_weight ~ ln_size, data= data)
+hist(weights_schultz$av_size_mm, breaks=c(1:35), main= "Data of Schultz (1996), (validation set)", ylim = c(0,25), xlab= "body length (mm)",cex.lab=1.4, cex.axis=1.4, cex.main=1.3)
+plot(weights_schultz$av_size_mm, weights_schultz$weight_mg, ylab="weight (mg)", xlab = "body length (mm)", ylim= c(0,900), xlim = c(0,35),cex.lab=1.4, cex.axis=1.4)
+par(mfrow= c(1,1))
 
-m1<- lm(ln_weight ~ ln_size + subfamily, data= data)
+# fitting models
+m0<- lm(ln_weight ~ ln_size, data= weights_booij)
+m1<- lm(ln_weight ~ ln_size + subfamily, data= weights_booij)
+m1r <-lmer(ln_weight ~ ln_size + (1|subfamily), weights_booij, REML = F)
+m2 <- lm(ln_weight ~ ln_size * subfamily, data= weights_booij)
+# in the manuscript the models are referred to as m_base, m_fixed, m_mixed, m_inter (in this order)
 
-m1r <-lmer(ln_weight ~ ln_size + (1|subfamily), data= data)
+tab_model(m0,m1,m1r,m2, dv.labels= c("m_base","m_fixed","m_mixed","m_inter"), show.df=T, show.dev=T, digits = 4)
 
-m2 <-lm(ln_weight ~ ln_size * subfamily, data= data)
+# Diagnostics with DHARMa package
+resids <- simulateResiduals(fittedModel = m0, plot=F)
+plotQQunif(resids)
 
-tab_model(m0,m1,m1r,m2, dv.labels= c("m0","m1","m1r",  "m2"))
+resids <- simulateResiduals(fittedModel = m1, plot=F)
+plotQQunif(resids)
 
-r.squaredGLMM(m1r)
+resids <- simulateResiduals(fittedModel = m1r, plot=F)
+plotQQunif(resids)
 
-## implementing existing size-weight models ####
+resids <- simulateResiduals(fittedModel = m2, plot=F)
+plotQQunif(resids)
 
-# Szyszko, J. (1983) Methods of macrofauna investigations., in: Szyszko J (Eds) The Process of Forest Soil Macrofauna Formation after Afforestation Farmland. Warsaw Agricultural University Press, Warsaw, pp. 10-16.
-# ln(weight) = -8.92804283 + 2.5554921 * ln(size)
-
-syszko_weight<- function(size){
+# implementing Syzsko (1983) as a function
+szyszko_weight<- function(size){
   ln_size <- log(size)
   ln_weight <- -8.92804283 + 2.5554921* ln_size
   weight_mg <- exp(ln_weight)*1000
   return(weight_mg)
 }
 
-# Booij, K., den Nijs, L., Heijermann, T., Jorritsma, I., Lock, C., Noorlander, J. (1994) Size and weight of carabid beetles: ecological applications. Proc Exper Appl Entomol.
-# log(weight) = -1,3 + 2.95 * log(size)    
-
+# implementing Booij et al. (1994) as a function
 booij_weight<- function(size){
   log_size <- log10(size)
   log_weight <- (-1.3 + 2.95 *log_size)
@@ -81,465 +99,630 @@ booij_weight<- function(size){
   return(weight_mg)
 }
 
-## leave one out cross-validation ####
+# predicting weights for the Schultz (1996) dataset
+ 
+weights_schultz$szyszko_pred <- szyszko_weight(weights_schultz$av_size_mm)
 
-#m0
-data$m0_loocv <- 0
+weights_schultz$booij_pred <- booij_weight(weights_schultz$av_size_mm)
 
-its <- c(1:nrow(data))
+pred<- predict(m0, newdata = weights_schultz, type="response")
+weights_schultz$m0_pred <- exp(pred)
 
-for (i in its){
-  loopdata <- data[-i,] 
-  beetle <-  data[i,]
-  m <-  lm(ln_weight ~ ln_size, data= loopdata)
-  pred<- predict.lm(m, newdata = beetle, type="response")
-  data[i,]$m0_loocv <- exp(pred)
-}
+pred<- predict(m1, newdata = weights_schultz, type="response")
+weights_schultz$m1_pred <- exp(pred)
 
-# m1 #
-data$m1_loocv <- 0
+pred<- predict(m1r, newdata = weights_schultz, re.form=NA)
+weights_schultz$m1r_pred <- exp(pred)
 
-its <- c(1:nrow(data))
-
-for (i in its){
-  loopdata <- data[-i,] 
-  beetle <-  data[i,]
-  m <-  lm(ln_weight ~ ln_size + subfamily, data= loopdata)
-  pred<- predict.lm(m, newdata = beetle, type="response")
-  data[i,]$m1_loocv <- exp(pred)
-}
-
-# m1r#
-data$m1r_loocv <- 0
-
-its <- c(1:nrow(data))
-
-for (i in its){
-  loopdata <- data[-i,] 
-  beetle <-  data[i,]
-  m <-  lmer(ln_weight ~ ln_size + (1|subfamily), data= loopdata)
-  pred<- predict(m, newdata = beetle, re.form=NA)
-  data[i,]$m1r_loocv <- exp(pred)
-}
-
-# m2 #
-data$m2_loocv <- 0
-
-its <- c(1:nrow(data))
-
-for (i in its){
-  loopdata <- data[-i,] 
-  beetle <-  data[i,]
-  m <-  lm(ln_weight ~ ln_size * subfamily, data= loopdata)
-  pred<- predict(m, newdata = beetle, type="response")
-  data[i,]$m2_loocv <- exp(pred)
-}
+pred<- predict(m2, newdata = weights_schultz, type="response")
+weights_schultz$m2_pred <- exp(pred)
 
 
-## predict with models of Szyszko and Booij et al. ####
+# calculated error in percent bodyweight
+weights_schultz$szyszko_off <- (weights_schultz$szyszko_pred - weights_schultz$weight_mg)/weights_schultz$weight_mg *100
 
-data$syszko_weight <- syszko_weight(data$av_size_mm)
+weights_schultz$booij_off <- (weights_schultz$booij_pred - weights_schultz$weight_mg)/weights_schultz$weight_mg *100
 
-data$booij_weight <- booij_weight(data$av_size_mm)
+weights_schultz$m0_off <- (weights_schultz$m0_pred - weights_schultz$weight_mg)/weights_schultz$weight_mg *100
 
+weights_schultz$m1_off <- (weights_schultz$m1_pred - weights_schultz$weight_mg)/weights_schultz$weight_mg *100
 
-## model evaluation ####
+weights_schultz$m1r_off <- (weights_schultz$m1r_pred - weights_schultz$weight_mg)/weights_schultz$weight_mg *100
 
-# calculate percent offset from real values 
+weights_schultz$m2_off <- (weights_schultz$m2_pred - weights_schultz$weight_mg)/weights_schultz$weight_mg *100
 
-data$m0_off <- (data$m0_loocv - data$weight_mg)/data$weight_mg *100
+# Figure 3, relative deviation graphs (sensu Mitchell, 1997)
+par(mfrow= c(3,2))
 
-data$m1_off <- (data$m1_loocv - data$weight_mg)/data$weight_mg *100
+plot(weights_schultz$szyszko_off ~ weights_schultz$av_size_mm,ylim=c(-70,220), ylab= "", xlab="",pch=20, cex.lab=1.5, cex=1.5, cex.axis=1.5, cex.main=1.2)
+abline(h=0,  col="red")
+title("m_Szyszko", line = 1, cex=1.4)
 
-data$m1r_off <- (data$m1r_loocv - data$weight_mg)/data$weight_mg *100
-
-data$m2_off <- (data$m2_loocv - data$weight_mg)/data$weight_mg *100
-
-data$syszko_off <- (data$syszko_weight - data$weight_mg)/data$weight_mg *100
-
-data$booij_off <- (data$booij_weight - data$weight_mg)/data$weight_mg *100
-
-
-
-# mean deviation per section 
-
-section <- c(1:3)
-
-f <- c(
-  mean(abs(data$m0_off[data$size_section == 1])),
-  mean(abs(data$m0_off[data$size_section == 2])),
-  mean(abs(data$m0_off[data$size_section == 3]))
-)
-
-g <- c(
-  mean(abs(data$m1_off[data$size_section == 1])),
-  mean(abs(data$m1_off[data$size_section == 2])),
-  mean(abs(data$m1_off[data$size_section == 3]))
-)
-
-z <- c(
-  mean(abs(data$m1r_off[data$size_section == 1])),
-  mean(abs(data$m1r_off[data$size_section == 2])),
-  mean(abs(data$m1r_off[data$size_section == 3]))
-)
-
-h <- c(
-  mean(abs(data$m2_off[data$size_section == 1])),
-  mean(abs(data$m2_off[data$size_section == 2])),
-  mean(abs(data$m2_off[data$size_section == 3]))
-)
-
-k<- c(
-  mean(abs(data$syszko_off[data$size_section == 1])),
-  mean(abs(data$syszko_off[data$size_section == 2])),
-  mean(abs(data$syszko_off[data$size_section == 3]))
-)
-
-l <- c(
-  mean(abs(data$booij_off[data$size_section == 1])),
-  mean(abs(data$booij_off[data$size_section == 2])),
-  mean(abs(data$booij_off[data$size_section == 3]))
-)
-
-model_performance <- data.frame(section=section , m0=f , m1=g , m2=h ,m1r=z , syszko=k , booij=l)
-
-model_performance$section <- as.numeric(model_performance$section) 
-
-
-# evaluation plots
-
-# m0
-par(mfrow= c(2,1))
-
-plot(data$m0_off ~ data$av_size_mm, main="m0", ylim= c(-100,220), ylab= "percent of error", xlab="carabid body length (mm)",pch=20)
+plot(weights_schultz$booij_off ~ weights_schultz$av_size_mm, ylim=c(-70,220),  ylab= "", xlab="",pch=20, cex.lab=1.4, cex=1.5, cex.axis=1.5, cex.main=1.2)
 abline(h=0, col="red")
-abline(v=c(max(data$av_size_mm)/3, max(data$av_size_mm)/3*2), lty="dashed")
-plot( model_performance$section,model_performance$m0, type="l",lwd=2, ylim= c(0,60),xlim= c(0.65,3.5), xaxt="n", main= "Mean error per range section", xlab="", ylab="percent of error"  )
-axis(1, at = seq(1,3, by = 1), las=1 )
-text(model_performance$section,10, round(model_performance$m0, 2), cex=1.5, col="red")
-abline(v=c(1.5,2.5), lty="dashed")
+title("m_Booij", line = 1, cex=1.4)
 
-# m1
-plot(data$m1_off ~ data$av_size_mm, main="m1", ylim= c(-100,220), ylab= "percent of error", xlab="carabid body length (mm)",pch=20)
+plot(weights_schultz$m0_off ~ weights_schultz$av_size_mm, ylim=c(-70,220), ylab= "percent of error", xlab="",pch=20, cex.lab=2, cex=1.5, cex.axis=1.5, cex.main=1.2)
 abline(h=0, col="red")
-abline(v=c(max(data$av_size_mm)/3, max(data$av_size_mm)/3*2), lty="dashed")
-plot( model_performance$section,model_performance$m1, type="l",lwd=2, ylim= c(0,60),xlim= c(0.65,3.5), xaxt="n", main= "Mean error per range section", xlab="", ylab="percent of error"  )
-axis(1, at = seq(1,4, by = 1), las=1 )
-text(model_performance$section,10, round(model_performance$m1, 2), cex=1.5, col="red")
-abline(v=c(1.5,2.5), lty="dashed")
+title("m_base", line = 1, cex=1.4)
+?title
 
-#  m1r
-plot(data$m1r_off ~ data$av_size_mm, main="m1r", ylim= c(-100,220), ylab= "percent of error", xlab="carabid body length (mm)",pch=20)
+plot(weights_schultz$m1_off ~ weights_schultz$av_size_mm, ylim=c(-70,220), ylab= "", xlab="",pch=20, cex.lab=1.4, cex=1.5, cex.axis=1.5, cex.main=1.2)
 abline(h=0, col="red")
-abline(v=c(max(data$av_size_mm)/3, max(data$av_size_mm)/3*2), lty="dashed")
-plot( model_performance$section,model_performance$m1r, type="l",lwd=2, ylim= c(0,60),xlim= c(0.65,3.5), xaxt="n", main= "Mean error per range section", xlab="", ylab="percent of error"  )
-axis(1, at = seq(1,4, by = 1), las=1 )
-text(model_performance$section,10, round(model_performance$m1r, 2), cex=1.5, col="red")
-abline(v=c(1.5,2.5), lty="dashed")
+title("m_fixed", line = 1, cex=1.4)
 
-# m2 
-
-plot(data$m2_off ~ data$av_size_mm, main="m2", ylim= c(-100,220), ylab= "percent of error", xlab="carabid body length (mm)",pch=20)
+plot(weights_schultz$m1r_off ~ weights_schultz$av_size_mm,ylim=c(-70,220), ylab= "", xlab="body length (mm)",pch=20, cex.lab=2, cex=1.5, cex.axis=1.5, cex.main=1.2)
 abline(h=0, col="red")
-abline(v=c(max(weights_clean$av_size_mm)/3, max(weights_clean$av_size_mm)/3*2), lty="dashed")
-plot( model_performance$section,model_performance$m2, type="l",lwd=2, ylim= c(0,60),xlim= c(0.65,3.5), xaxt="n", main= "Mean error per range section", xlab="", ylab="percent of error"  )
-axis(1, at = seq(1,4, by = 1), las=1 )
-text(model_performance$section,10, round(model_performance$m2, 2), cex=1.5, col="red")
-abline(v=c(1.5,2.5), lty="dashed")
+title("m_mixed", line = 1, cex=1.4)
 
-# szyszko
-
-plot(data$syszko_off ~ data$av_size_mm, main="Model sensu Szyszko (1983)",ylim= c(-100,220), ylab= "percent of error", xlab="carabid body length (mm)",pch=20)
+plot(weights_schultz$m2_off ~ weights_schultz$av_size_mm,ylim=c(-70,220), ylab= "", xlab="",pch=20, cex.lab=1.4, cex=1.5, cex.axis=1.5, cex.main=1.2)
 abline(h=0, col="red")
-abline(v=c(max(data$av_size_mm)/3, max(data$av_size_mm)/3*2), lty="dashed")
-plot( model_performance$section,model_performance$syszko, type="l",lwd=2, ylim= c(0,60),xlim= c(0.65,3.5), xaxt="n", main= "Mean error per range section", xlab="", ylab="percent of error"  )
-axis(1, at = seq(1,4, by = 1), las=1 )
-text(model_performance$section,10, round(model_performance$syszko, 2), cex=1.5, col="red")
-abline(v=c(1.5,2.5), lty="dashed")
+title("m_inter", line = 1, cex=1.4)
 
-# Booij et al.
+# observed vs. predicted regression (sensu Pineiro et al., 2008)
+ref_weights <- data.frame(
+  model= "reference",
+  obs_weight=weights_schultz$weight_mg,
+  pred_weight= weights_schultz$weight_mg, 
+  weight_off= 0)
 
-plot(data$booij_off ~ data$av_size_mm, main="Model sensu Booij et al (1994)",ylim= c(-100,220),  ylab= "percent of error", xlab="carabid body length (mm)",pch=20)
-abline(h=0, col="red")
-abline(v=c(max(data$av_size_mm)/3, max(data$av_size_mm)/3*2), lty="dashed")
-plot( model_performance$section,model_performance$booij, type="l",lwd=2, ylim= c(0,60),xlim= c(0.65,3.5), xaxt="n", main= "Mean of absolute error per range section", xlab="", ylab="percent of error"  )
-axis(1, at = seq(1,4, by = 1), las=1 )
-text(model_performance$section,10, round(model_performance$booij, 2), cex=1.5, col="red")
-abline(v=c(1.5,2.5), lty="dashed")
+szyzsko_preds <- data.frame(
+  model= "szyszko",
+  obs_weight=weights_schultz$weight_mg,
+  pred_weight= weights_schultz$szyszko_pred, 
+  weight_off= weights_schultz$szyszko_off)
+
+booij_preds <- data.frame(
+  model= "booij",
+  obs_weight=weights_schultz$weight_mg,
+  pred_weight= weights_schultz$booij_pred, 
+  weight_off= weights_schultz$booij_off)
+
+m0_preds <- data.frame(
+  model= "m_base",
+  obs_weight=weights_schultz$weight_mg,
+  pred_weight= weights_schultz$m0_pred, 
+  weight_off= weights_schultz$m0_off)
+
+m1_preds <- data.frame(
+  model= "m_fixed",
+  obs_weight=weights_schultz$weight_mg,
+  pred_weight= weights_schultz$m1_pred, 
+  weight_off= weights_schultz$m1_off)
+
+m1r_preds <- data.frame(
+  model= "m_mixed",
+  obs_weight=weights_schultz$weight_mg,
+  pred_weight= weights_schultz$m1r_pred, 
+  weight_off= weights_schultz$m1r_off)
+
+m2_preds <- data.frame(
+  model= "m_inter",
+  obs_weight=weights_schultz$weight_mg,
+  pred_weight= weights_schultz$m2_pred, 
+  weight_off= weights_schultz$m2_off)
+
+resids_data <- rbind(ref_weights,szyzsko_preds, booij_preds, m0_preds, m1_preds, m1r_preds, m2_preds)
+resids_data$ln_pred_weight <- log(resids_data$pred_weight)
+resids_data$ln_obs_weight <- log(resids_data$obs_weight)
+resids_data$model <- as.factor(resids_data$model)
+resids_data <- within(resids_data, model <- relevel(model, ref = "reference"))
+
+err_mod <- lm(obs_weight ~ pred_weight * model, data=resids_data)
+
+resids <- simulateResiduals(fittedModel = err_mod, plot=T)
+plotQQunif(resids)
+
+log_err_mod <- lm(ln_obs_weight ~ ln_pred_weight * model, data=resids_data)
+
+resids <- simulateResiduals(fittedModel = log_err_mod, plot=T)
+plotQQunif(resids)
+
+# Figure 4
+ref_data <- resids_data[resids_data$model== "reference",]
+par(mfrow= c(6,2))
+
+ln_pred_weight <- seq(min(resids_data$ln_pred_weight), max(resids_data$ln_pred_weight), length.out = 100)
+ln_obs_weight  <- seq(min(resids_data$ln_obs_weight), max(resids_data$ln_obs_weight), length.out = 100)
+pred_data   <- data.frame(ln_pred_weight=ln_pred_weight, model="szyszko")
+preds       <- predict(log_err_mod, newdata = pred_data, intervals="confidence")
+
+data <- resids_data[resids_data$model== "szyszko",]
+r2_mod <- lm(ln_obs_weight ~ ln_pred_weight, data=data)
+summary(r2_mod)
+
+plot(ln_obs_weight ~ ln_pred_weight,pch=20, data=data, type="p", ylab="", xlab="", cex.lab=1.5, cex= 1.4, cex.axis=1.5, col="grey")
+lines(-1:9 , -1:9,lty= 2,lwd=2)
+lines(preds$fit ~ ln_pred_weight, lwd=2, col="red")
+mtext("log-transformed", 3, line=2,cex=1.3, at=3.5)
+mtext("m_Szyszko", 3, line=-2,cex=1.3, at=1.5)
+mtext("intercept: ***", 3, line=-4,cex=1, at=1.5)
+mtext("    slope: ***", 3, line=-5.5,cex=1, at=1.5)
+mtext("R² = 0.9515", 1, line=-3, cex = 1.3, at=6)
+
+pred_weight <- seq(min(resids_data$pred_weight), max(resids_data$pred_weight), length.out = 100)
+obs_weight  <- seq(min(resids_data$obs_weight), max(resids_data$obs_weight), length.out = 100)
+pred_data   <- data.frame(pred_weight=pred_weight, model="szyszko")
+preds       <- predict(err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "szyszko",]
+r2_mod <- lm(obs_weight ~ pred_weight, data=data)
+summary(r2_mod)
+
+plot(obs_weight ~ pred_weight,pch=20, data=data, type="p", ylab="", xlab="", cex.lab=1.5, cex= 1.4, cex.axis=1.5, col="black")
+lines(1:1200 , 1:1200,lty= 2,lwd=4)
+lines(preds$fit ~ pred_weight, lwd=2, col="red")
+mtext("not transformed", 3, line=2,cex=1.3, at=450)
+mtext("m_Szyszko", 3, line=-2,cex=1.3, at=150)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=150)
+mtext("    slope: n.s.", 3, line=-5.5,cex=1, at=150)
+mtext("R² = 0.8823", 1, line=-3, cex = 1.3, at=700)
+
+ln_pred_weight <- seq(min(resids_data$ln_pred_weight), max(resids_data$ln_pred_weight), length.out = 100)
+ln_obs_weight  <- seq(min(resids_data$ln_obs_weight), max(resids_data$ln_obs_weight), length.out = 100)
+pred_data   <- data.frame(ln_pred_weight=ln_pred_weight, model="booij")
+preds       <- predict(log_err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "booij",]
+r2_mod <- lm(ln_obs_weight ~ ln_pred_weight, data=data)
+summary(r2_mod)
+
+plot(ln_obs_weight ~ ln_pred_weight,pch=20, data=data, type="p", ylab="", xlab="", cex.lab=1.5, cex= 1.4, cex.axis=1.5, col="grey")
+lines(-1:9 , -1:9,lty= 2,lwd=2)
+lines(preds$fit ~ ln_pred_weight, lwd=2, col="red")
+mtext("m_Booij", 3, line=-2,cex=1.3, at=1)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=1)
+mtext("    slope: n.s.", 3, line=-5.5,cex=1, at=1)
+mtext("R² = 0.9515", 1, line=-3, cex = 1.3, at=6)
+
+pred_weight <- seq(min(resids_data$pred_weight), max(resids_data$pred_weight), length.out = 100)
+obs_weight  <- seq(min(resids_data$obs_weight), max(resids_data$obs_weight), length.out = 100)
+pred_data   <- data.frame(pred_weight=pred_weight, model="booij")
+preds       <- predict(err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "booij",]
+r2_mod <- lm(obs_weight ~ pred_weight, data=data)
+summary(r2_mod)
+
+plot(obs_weight ~ pred_weight,pch=20, data=data, type="p", ylab="", xlab="", cex.lab=1.5, cex= 1.4, cex.axis=1.5, col="black")
+lines(1:1200 , 1:1200,lty= 2,lwd=2)
+lines(preds$fit ~ pred_weight, lwd=2, col="red")
+mtext("m_Booij", 3, line=-2,cex=1.3, at=150)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=170)
+mtext("    slope: ***", 3, line=-5.5,cex=1, at=160)
+mtext("R² = 0.8539", 1, line=-3, cex = 1.3, at=1000)
+
+ln_pred_weight <- seq(min(resids_data$ln_pred_weight), max(resids_data$ln_pred_weight), length.out = 100)
+ln_obs_weight  <- seq(min(resids_data$ln_obs_weight), max(resids_data$ln_obs_weight), length.out = 100)
+pred_data   <- data.frame(ln_pred_weight=ln_pred_weight, model="m_base")
+preds       <- predict(log_err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "m_base",]
+r2_mod <- lm(ln_obs_weight ~ ln_pred_weight, data=data)
+summary(r2_mod)
+
+plot(ln_obs_weight ~ ln_pred_weight,pch=20, data=data, type="p", ylab="log(observed weights)", xlab="",  cex.lab=2, cex= 1.4, cex.axis=1.5, col="grey")
+lines(-1:9 , -1:9,lty= 2,lwd=3)
+lines(preds$fit ~ ln_pred_weight, lwd=2, col="red")
+mtext("m_base", 3, line=-2,cex=1.3, at=1)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=1)
+mtext("    slope: n.s.", 3, line=-5.5,cex=1, at=1)
+mtext("R² = 0.9515", 1, line=-3, cex = 1.3, at=6)
+
+pred_weight <- seq(min(resids_data$pred_weight), max(resids_data$pred_weight), length.out = 100)
+obs_weight  <- seq(min(resids_data$obs_weight), max(resids_data$obs_weight), length.out = 100)
+pred_data   <- data.frame(pred_weight=pred_weight, model="m_base")
+preds       <- predict(err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "m_base",]
+r2_mod <- lm(obs_weight ~ pred_weight, data=data)
+summary(r2_mod)
+
+plot(obs_weight ~ pred_weight,pch=20, data=data, type="p", ylab="observed weights (mg)", xlab="",  cex.lab=2, cex= 1.4, cex.axis=1.5, col="black")
+lines(1:1200 , 1:1200,lty= 2,lwd=2)
+lines(preds$fit ~ pred_weight, lwd=2, col="red")
+mtext("m_base", 3, line=-2,cex=1.3, at=150)
+mtext("intercept: *", 3, line=-4,cex=1, at=150)
+mtext("    slope: ***", 3, line=-5.5,cex=1, at=150)
+mtext("R² = 0.8516", 1, line=-3, cex = 1.3, at=1000)
+
+ln_pred_weight <- seq(min(resids_data$ln_pred_weight), max(resids_data$ln_pred_weight), length.out = 100)
+ln_obs_weight  <- seq(min(resids_data$ln_obs_weight), max(resids_data$ln_obs_weight), length.out = 100)
+pred_data   <- data.frame(ln_pred_weight=ln_pred_weight, model="m_fixed")
+preds       <- predict(log_err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "m_fixed",]
+r2_mod <- lm(ln_obs_weight ~ ln_pred_weight, data=data)
+summary(r2_mod)
+
+plot(ln_obs_weight ~ ln_pred_weight,pch=20, data=data, type="p", ylab="", xlab="", cex.lab=1.5, cex= 1.4, cex.axis=1.5, col="grey")
+lines(-1:9 , -1:9,lty= 2,lwd=3)
+lines(preds$fit ~ ln_pred_weight, lwd=2, col="red")
+mtext("m_fixed", 3, line=-2,cex=1.3, at=1)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=1)
+mtext("    slope: n.s.", 3, line=-5.5,cex=1, at=1)
+mtext("R² = 0.9516", 1, line=-3, cex = 1.3, at=6)
+
+pred_weight <- seq(min(resids_data$pred_weight), max(resids_data$pred_weight), length.out = 100)
+obs_weight  <- seq(min(resids_data$obs_weight), max(resids_data$obs_weight), length.out = 100)
+pred_data   <- data.frame(pred_weight=pred_weight, model="m_fixed")
+preds       <- predict(err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "m_fixed",]
+r2_mod <- lm(obs_weight ~ pred_weight, data=data)
+summary(r2_mod)
+
+plot(obs_weight ~ pred_weight,pch=20, data=data, type="p", ylab="", xlab="", cex.lab=1.5, cex= 1.4, cex.axis=1.5, col="black")
+lines(1:1200 , 1:1200,lty= 2,lwd=2)
+lines(preds$fit ~ pred_weight, lwd=2, col="red")
+mtext("m_fixed", 3, line=-2,cex=1.3, at=150)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=150)
+mtext("    slope: ***", 3, line=-5.5,cex=1, at=150)
+mtext("R² = 0.8584", 1, line=-3, cex = 1.3, at=900)
+
+ln_pred_weight <- seq(min(resids_data$ln_pred_weight), max(resids_data$ln_pred_weight), length.out = 100)
+ln_obs_weight  <- seq(min(resids_data$ln_obs_weight), max(resids_data$ln_obs_weight), length.out = 100)
+pred_data   <- data.frame(ln_pred_weight=ln_pred_weight, model="m_mixed")
+preds       <- predict(log_err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "m_mixed",]
+r2_mod <- lm(ln_obs_weight ~ ln_pred_weight, data=data)
+summary(r2_mod)
+
+plot(ln_obs_weight ~ ln_pred_weight,pch=20, data=data, type="p", ylab="", xlab="", cex.lab=2, cex= 1.4, cex.axis=1.5, col="grey")
+lines(-1:9 , -1:9,lty= 2,lwd=3)
+lines(preds$fit ~ ln_pred_weight, lwd=2, col="red")
+mtext("m_mixed", 3, line=-2,cex=1.3, at=1)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=1)
+mtext("    slope: n.s.", 3, line=-5.5,cex=1, at=1)
+mtext("R² = 0.9515", 1, line=-3, cex = 1.3, at=6)
+
+pred_weight <- seq(min(resids_data$pred_weight), max(resids_data$pred_weight), length.out = 100)
+obs_weight  <- seq(min(resids_data$obs_weight), max(resids_data$obs_weight), length.out = 100)
+pred_data   <- data.frame(pred_weight=pred_weight, model="m_mixed")
+preds       <- predict(err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "m_mixed",]
+r2_mod <- lm(obs_weight ~ pred_weight, data=data)
+summary(r2_mod)
+
+plot(obs_weight ~ pred_weight,pch=20, data=data, type="p", ylab="", xlab="", cex.lab=2, cex= 1.4, cex.axis=1.5, col="black")
+lines(1:1200 , 1:1200,lty= 2,lwd=2)
+lines(preds$fit ~ pred_weight, lwd=2, col="red")
+mtext("m_mixed", 3, line=-2,cex=1.3, at=150)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=150)
+mtext("    slope: ***", 3, line=-5.5,cex=1, at=150)
+mtext("R² = 0.8558", 1, line=-3, cex = 1.3, at=900)
+
+ln_pred_weight <- seq(min(resids_data$ln_pred_weight), max(resids_data$ln_pred_weight), length.out = 100)
+ln_obs_weight  <- seq(min(resids_data$ln_obs_weight), max(resids_data$ln_obs_weight), length.out = 100)
+pred_data   <- data.frame(ln_pred_weight=ln_pred_weight, model="m_inter")
+preds       <- predict(log_err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "m_inter",]
+r2_mod <- lm(ln_obs_weight ~ ln_pred_weight, data=data)
+summary(r2_mod)
+
+plot(ln_obs_weight ~ ln_pred_weight,pch=20, data=data, type="p", ylab="", xlab="log(predicted weights)", cex.lab=2, cex= 1.4, cex.axis=1.4, col="grey")
+lines(-1:9 , -1:9,lty= 2,lwd=3)
+lines(preds$fit ~ ln_pred_weight, lwd=2, col="red")
+mtext("m_inter", 3, line=-2,cex=1.3, at=1)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=1)
+mtext("    slope: n.s.", 3, line=-5.5,cex=1, at=1)
+mtext("R² = 0.9520", 1, line=-3, cex = 1.3, at=6)
+
+pred_weight <- seq(min(resids_data$pred_weight), max(resids_data$pred_weight), length.out = 100)
+obs_weight  <- seq(min(resids_data$obs_weight), max(resids_data$obs_weight), length.out = 100)
+pred_data   <- data.frame(pred_weight=pred_weight, model="m_inter")
+preds       <- predict(err_mod, newdata = pred_data, type="response", se.fit = T)
+
+data <- resids_data[resids_data$model== "m_inter",]
+r2_mod <- lm(obs_weight ~ pred_weight, data=data)
+summary(r2_mod)
+
+plot(obs_weight ~ pred_weight,pch=20, data=data, type="p", ylab="", xlab="predicted weights (mg)", cex.lab=2, cex= 1.4, cex.axis=1.4, col="black")
+lines(1:1200 , 1:1200,lty= 2,lwd=2)
+lines(preds$fit ~ pred_weight, lwd=2, col="red")
+mtext("m_inter", 3, line=-2,cex=1.3, at=150)
+mtext("intercept: n.s.", 3, line=-4,cex=1, at=150)
+mtext("    slope: n.s.", 3, line=-5.5,cex=1, at=150)
+mtext("R² = 0.9052", 1, line=-3, cex = 1.3, at=700)
+
+pred_ln_size <- seq(min(weights_clean$ln_size), max(weights_clean$ln_size), length.out = 100)
+
+pred_trechinae <- c(rep("Trechinae",100))
+pred_harpalinae <- c(rep("Harpalinae", 100))
+pred_carabinae <- c(rep("Carabinae", 100))
+pred_scaritinae <- c(rep("Scaritinae ", 100))
+pred_elaphrinae <- c(rep("Elaphrinae", 100))
+pred_nebriinae <- c(rep("Nebriinae", 100))
+
+pred_trechinae <- data.frame(ln_size=pred_ln_size, subfamily=pred_trechinae)
+pred_harpalinae <- data.frame(ln_size=pred_ln_size, subfamily=pred_harpalinae)
+pred_carabinae <- data.frame(ln_size=pred_ln_size, subfamily=pred_carabinae)
+pred_scaritinae <-data.frame(ln_size=pred_ln_size, subfamily=pred_scaritinae)
+pred_elaphrinae <- data.frame(ln_size=pred_ln_size, subfamily=pred_elaphrinae)
+pred_nebriinae <-data.frame(ln_size=pred_ln_size, subfamily=pred_nebriinae)
 
 
-# overall mean error
-
-models <- c("Szyszko", "Booij et al", "m0",  "m1","m1r", "m2")
-models <- ordered(models, levels = c("Szyszko", "Booij et al", "m0",  "m1","m1r", "m2" ))
-
-balanced_mean <- c(
-  mean(model_performance$syszko),
-  mean(model_performance$booij),
-  mean(model_performance$m0),
-  mean(model_performance$m1),
-  mean(model_performance$m1r),
-  mean(model_performance$m2))
-
-balanced_mean <- data.frame(mean = balanced_mean, model =models)
-
-par(mfrow=c(1,1))
-plot(balanced_mean$mean,balanced_mean$models, ylim= c(20,35), xaxt="n", xlab="",main=" ", ylab="percent of error", pch=18,cex=2, col="black")
-axis(1, at= c(1:6), labels = c("Szyszko", "Booij et al", "m0",  "m1","m1r", "m2"  ), las=2, cex.axis=1.1 )
-abline(v=c(2.5), lty="dashed")
-text(balanced_mean$model,balanced_mean$mean-2, round(balanced_mean$mean, 2), cex=1.2, col="black")
-
-
-## catch simulation ####
-
-par(mfrow=c(1,3))
-
-# for smaller beetles 
-
-random_catch_results <- data.frame(true=double(), szyszko=double(), booij=double(), m0=double() , m1=double(), m1r=double(), m2=double())
-
-data2 <- data[data$size_section == 1,]
-
-its = c(1:1000)
-species = c(10:20)
-individuals = c(80:120)
-
-set.seed(128)
-for (i in its){
-  no_species <- sample(species,1)
-  no_individuals <- sample(individuals,1)
-  
-  random_species <- data2[sample(nrow(data2), no_species, replace = F),]
-  
-  random_catch <- random_species[sample(nrow(random_species), no_individuals, replace = T),]
-  
-  random_catch_results[i,]$true <- sum(random_catch$weight_mg)
-  random_catch_results[i,]$m0 <- sum(random_catch$m0_loocv) - sum(random_catch$weight_mg)
-  random_catch_results[i,]$m1 <- sum(random_catch$m1_loocv) - sum(random_catch$weight_mg)
-  random_catch_results[i,]$m1r <- sum(random_catch$m1r_loocv)- sum(random_catch$weight_mg)
-  random_catch_results[i,]$m2 <- sum(random_catch$m2_loocv)- sum(random_catch$weight_mg)
-  random_catch_results[i,]$szyszko <- sum(random_catch$syszko_weight)- sum(random_catch$weight_mg)
-  random_catch_results[i,]$booij <- sum(random_catch$booij_weight)- sum(random_catch$weight_mg)
-}
-
-random_catch_results$szyszko_rel <- random_catch_results$szyszko/random_catch_results$true*100
-random_catch_results$booij_rel <- random_catch_results$booij/random_catch_results$true*100
-random_catch_results$m0_rel <- random_catch_results$m0/random_catch_results$true*100
-random_catch_results$m1_rel <- random_catch_results$m1/random_catch_results$true*100
-random_catch_results$m1r_rel <- random_catch_results$m1r/random_catch_results$true*100
-random_catch_results$m2_rel <- random_catch_results$m2/random_catch_results$true*100
-
-random_catch_synth_small <- data.frame(
-  
-  model=c("true", "szyszko", "booij", "m0", "m1", "m1r", "m2"), 
-  
-  mean=c(mean(random_catch_results$true),NA,NA,NA,NA,NA,NA), 
-  sd=c(sd(random_catch_results$true),NA,NA,NA,NA,NA,NA),
-  max=c(max(random_catch_results$true), NA,NA,NA,NA,NA,NA), 
-  min=c(min(random_catch_results$true) ,NA,NA,NA,NA,NA,NA))
-
-random_catch_synth_small$rel_err_mean <- c(NA, mean(abs(random_catch_results$szyszko_rel)), mean(abs(random_catch_results$booij_rel)),mean(abs(random_catch_results$m0_rel)),mean(abs(random_catch_results$m1_rel)),mean(abs     (random_catch_results$m1r_rel)),mean(abs(random_catch_results$m2_rel))) 
-
-random_catch_synth_small$rel_err_median <- c(NA, median(random_catch_results$szyszko_rel), median(random_catch_results$booij_rel), median(random_catch_results$m0_rel),median(random_catch_results$m1_rel),median(random_catch_results$m1r_rel),median(random_catch_results$m2_rel))
-
-
-plot(10, 1, xlim=c(1,6), ylim=c(-100,100), xaxt='n', xlab='', ylab="biomass error (%)", main="a", cex.main= 3,cex.lab= 2,cex.axis= 2)
-axis(1, labels=colnames(random_catch_results[,2:7]), at=1:6,cex.axis= 2)
-
-abline(h= 0, col="red")
-
-for(i in 1:ncol(random_catch_results[,8:13])) {
-  p <- random_catch_results[,i+7]
-  p <- p[! p %in% 0]
-  boxplot(p, add=T, at=i,cex.axis= 2 )
-}
-
-
-# for larger beetles
-
-random_catch_results <- data.frame(true=double(), szyszko=double(), booij=double(), m0=double() , m1=double(), m1r=double(), m2=double())
-
-data2 <- data[data$size_section != 1,]
-
-its = c(1:1000)
-species = c(10:20)
-individuals = c(80:120)
-
-set.seed(56)
-for (i in its){
-  no_species <- sample(species,1)
-  no_individuals <- sample(individuals,1)
-  
-  random_species <- data2[sample(nrow(data2), no_species, replace = F),]
-  
-  random_catch <- random_species[sample(nrow(random_species), no_individuals, replace = T),]
-  
-  random_catch_results[i,]$true <- sum(random_catch$weight_mg)
-  random_catch_results[i,]$m0 <- sum(random_catch$m0_loocv) - sum(random_catch$weight_mg)
-  random_catch_results[i,]$m1 <- sum(random_catch$m1_loocv) - sum(random_catch$weight_mg)
-  random_catch_results[i,]$m1r <- sum(random_catch$m1r_loocv)- sum(random_catch$weight_mg)
-  random_catch_results[i,]$m2 <- sum(random_catch$m2_loocv)- sum(random_catch$weight_mg)
-  random_catch_results[i,]$szyszko <- sum(random_catch$syszko_weight)- sum(random_catch$weight_mg)
-  random_catch_results[i,]$booij <- sum(random_catch$booij_weight)- sum(random_catch$weight_mg)
-}
-
-random_catch_results$szyszko_rel <- random_catch_results$szyszko/random_catch_results$true*100
-random_catch_results$booij_rel <- random_catch_results$booij/random_catch_results$true*100
-random_catch_results$m0_rel <- random_catch_results$m0/random_catch_results$true*100
-random_catch_results$m1_rel <- random_catch_results$m1/random_catch_results$true*100
-random_catch_results$m1r_rel <- random_catch_results$m1r/random_catch_results$true*100
-random_catch_results$m2_rel <- random_catch_results$m2/random_catch_results$true*100
-
-random_catch_synth_large <- data.frame(
-  
-  model=c("true", "szyszko", "booij", "m0", "m1", "m1r", "m2"), 
-  
-  mean=c(mean(random_catch_results$true),NA,NA,NA,NA,NA,NA), 
-  sd=c(sd(random_catch_results$true),NA,NA,NA,NA,NA,NA),
-  max=c(max(random_catch_results$true), NA,NA,NA,NA,NA,NA), 
-  min=c(min(random_catch_results$true) ,NA,NA,NA,NA,NA,NA))
-
-random_catch_synth_large$rel_err_mean <- c(NA, mean(abs(random_catch_results$szyszko_rel)), mean(abs(random_catch_results$booij_rel)),mean(abs(random_catch_results$m0_rel)),mean(abs(random_catch_results$m1_rel)),mean(abs     (random_catch_results$m1r_rel)),mean(abs(random_catch_results$m2_rel))) 
-
-random_catch_synth_large$rel_err_median <- c(NA, median(random_catch_results$szyszko_rel), median(random_catch_results$booij_rel), median(random_catch_results$m0_rel),median(random_catch_results$m1_rel),median(random_catch_results$m1r_rel),median(random_catch_results$m2_rel))
-
-plot(10, 1, xlim=c(1,6), ylim=c(-100,100), xaxt='n', xlab='', ylab="", main="b", cex.main= 3,cex.lab= 1.7,cex.axis= 2)
-axis(1, labels=colnames(random_catch_results[,2:7]), at=1:6, cex.main= 2,cex.lab= 2,cex.axis= 2)
-
-abline(h= 0, col="red")
-
-for(i in 1:ncol(random_catch_results[,8:13])) {
-  p <- random_catch_results[,i+7]
-  p <- p[! p %in% 0]
-  boxplot(p, add=T, at=i, cex.axis=2)
-}
-
-
-# mixed scenario 
-
-
-random_catch_results <- data.frame(true=double(), szyszko=double(), booij=double(), m0=double() , m1=double(), m1r=double(), m2=double())
-
-weights_clean_large <- data[data$size_section != 1,]
-weights_clean_small <- data[data$size_section == 1,]
-
-its = c(1:1000)
-species1 = c(5:10)
-species2 = c(5:10)
-individuals = c(80:120)
-
-set.seed(12)
-for (i in its){
-  no_species1 <- sample(species1,1)
-  no_species2 <- sample(species2,1)
-  
-  no_individuals <- sample(individuals,1)
-  
-  random_species1 <- weights_clean_small[sample(nrow(data2),  no_species1, replace = F),]
-  random_species2 <- weights_clean_large[sample(nrow(data2),  no_species2, replace = F),]
-  random_species <- rbind(random_species1,random_species2)
-  
-  random_catch <- random_species[sample(nrow(random_species), no_individuals, replace = T),]
-  
-  random_catch_results[i,]$true <- sum(random_catch$weight_mg)
-  random_catch_results[i,]$m0 <- sum(random_catch$m0_loocv) - sum(random_catch$weight_mg)
-  random_catch_results[i,]$m1 <- sum(random_catch$m1_loocv) - sum(random_catch$weight_mg)
-  random_catch_results[i,]$m1r <- sum(random_catch$m1r_loocv)- sum(random_catch$weight_mg)
-  random_catch_results[i,]$m2 <- sum(random_catch$m2_loocv)- sum(random_catch$weight_mg)
-  random_catch_results[i,]$szyszko <- sum(random_catch$syszko_weight)- sum(random_catch$weight_mg)
-  random_catch_results[i,]$booij <- sum(random_catch$booij_weight)- sum(random_catch$weight_mg)
-}
-
-random_catch_results$szyszko_rel <- random_catch_results$szyszko/random_catch_results$true*100
-random_catch_results$booij_rel <- random_catch_results$booij/random_catch_results$true*100
-random_catch_results$m0_rel <- random_catch_results$m0/random_catch_results$true*100
-random_catch_results$m1_rel <- random_catch_results$m1/random_catch_results$true*100
-random_catch_results$m1r_rel <- random_catch_results$m1r/random_catch_results$true*100
-random_catch_results$m2_rel <- random_catch_results$m2/random_catch_results$true*100
-
-
-random_catch_synth_mixed <- data.frame(
-  
-  model=c("true", "szyszko", "booij", "m0", "m1", "m1r", "m2"), 
-  
-  mean=c(mean(random_catch_results$true),NA,NA,NA,NA,NA,NA), 
-  sd=c(sd(random_catch_results$true),NA,NA,NA,NA,NA,NA),
-  max=c(max(random_catch_results$true), NA,NA,NA,NA,NA,NA), 
-  min=c(min(random_catch_results$true) ,NA,NA,NA,NA,NA,NA))
-
-random_catch_synth_mixed$rel_err_mean <- c(NA, mean(abs(random_catch_results$szyszko_rel)), mean(abs(random_catch_results$booij_rel)),mean(abs(random_catch_results$m0_rel)),mean(abs(random_catch_results$m1_rel)),mean(abs(random_catch_results$m1r_rel)),mean(abs(random_catch_results$m2_rel))) 
-
-random_catch_synth_mixed$rel_err_median <- c(NA, median(random_catch_results$szyszko_rel), median(random_catch_results$booij_rel), median(random_catch_results$m0_rel),median(random_catch_results$m1_rel),median(random_catch_results$m1r_rel),median(random_catch_results$m2_rel))
-
-
-plot(10, 1, xlim=c(1,6), ylim=c(-100,100), xaxt='n', xlab='', ylab="", main="c", cex.main= 3,cex.lab= 1.7,cex.axis= 2)
-axis(1, labels=colnames(random_catch_results[,2:7]), at=1:6, cex.axis=2)
-
-abline(h= 0, col="red")
-
-for(i in 1:ncol(random_catch_results[,8:13])) {
-  p <- random_catch_results[,i+7]
-  p <- p[! p %in% 0]
-  boxplot(p, add=T, at=i, cex.axis=2)
-}
-
-
-## Further plots and tables ####
-
-# data plot (introduction)
-
+# figure S1
 par(mfrow= c(1,2))
-plot(weights_clean2$weight_mg ~ weights_clean2$av_size_mm, pch=8, main= "a", ylab="weight (mg)", xlab="body length (mm)", col="grey")
+preds<- predict(m0, newdata = pred_harpalinae, interval = "confidence")
 
-pred_size <- seq(min(weights_clean$av_size_mm), max(weights_clean$av_size_mm), length.out = 100)
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="weight (mg)", xlab="body length (mm)", main="", col="grey", cex=0.8,cex.lab=1.4, cex.axis=1.1)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
 
-lines(pred_size, syszko_weight(pred_size), lty="dotted", lwd=2)
-lines(pred_size, booij_weight(pred_size), lty="twodash", lwd=2)
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="ln(weight)", xlab="ln(body length)", main="", col="grey", cex=0.8,cex.lab=1.4, cex.axis=1.1)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
 
-#on the log scale
+# figure S2
+par(mfrow= c(6,2))
+preds<- predict(m1, newdata = pred_harpalinae, interval = "confidence")
 
-plot(weights_clean$ln_weight ~ weights_clean$ln_size, pch=8, main= "b", ylab="ln(weight)", xlab="ln(body length)",col="grey")
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="", main="Harpalinae", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
 
-pred_ln_size <- log(pred_size)
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="", main="", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
 
-lines(pred_ln_size, log(syszko_weight(pred_size)),lty="dotted", lw=2)
-lines(pred_ln_size, log(booij_weight(pred_size)),lty="twodash", lw=2)
+preds<- predict(m1, newdata = pred_carabinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="", main="Carabinae", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="", main="", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+preds<- predict(m1, newdata = pred_elaphrinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="weight (mg)", xlab="", main="Elaphrinae", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="ln(weight)", xlab="", main="", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+preds<- predict(m1, newdata = pred_nebriinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="", main="Nebriinae", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="", main="", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+preds<- predict(m1, newdata = pred_scaritinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="", main="Scaritinae", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="", main="", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+preds<- predict(m1, newdata = pred_trechinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="body length (mm)", main="Trechinae", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="ln(body length)", main="", col="grey", cex=0.8,cex.lab=1.6,cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+# figure S3
+par(mfrow= c(2,1))
+preds<- predict(m1r, newdata = pred_harpalinae, re.form=NA)
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="weight (mg)", xlab="body length (mm)", main="", col="grey", cex=0.8,cex.lab=1.4, cex.axis=1.1)
+mtext("a", 3, line=-2,cex=1.3, at=7)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="ln(weight)", xlab="ln(body length)", main="", col="grey", cex=0.8,cex.lab=1.4, cex.axis=1.1)
+mtext("b", 3, line=-2,cex=1.3, at=1.5)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds,col="red", lw=2)
+
+# figure S4
+par(mfrow= c(6,2))
+preds<- predict(m2, newdata = pred_harpalinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="", main="Harpalinae", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="", main="", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+preds<- predict(m2, newdata = pred_carabinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="", main="Carabinae", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="", main="", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+preds<- predict(m2, newdata = pred_elaphrinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="weight (mg)", xlab="", main="Elaphrinae", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="ln(weight)", xlab="", main="", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+preds<- predict(m2, newdata = pred_nebriinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="", main="Nebriinae", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="", main="", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+preds<- predict(m2, newdata = pred_scaritinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="", main="Scaritinae", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="", main="", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
+
+preds<- predict(m2, newdata = pred_trechinae, interval = "confidence")
+
+plot(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, ylab="", xlab="body length (mm)", main="Trechinae", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=7)
+polygon(c(rev(exp(pred_ln_size)), exp(pred_ln_size)), c(rev(exp(preds[ ,3])), exp(preds[ ,2])), col = 'mistyrose2', border = NA)
+points(weights_schultz$weight_mg ~ weights_schultz$av_size_mm, pch=20, cex=0.8)
+points(weights_booij$weight_mg ~ weights_booij$av_size_mm, pch=20, cex=0.8)
+lines(exp(pred_ln_size), exp(preds[,1]), col="red", lw=2)
+
+plot(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, ylab="", xlab="ln(body length)", main="", col="grey", cex=0.8,cex.lab=1.5, cex.axis=1.4, cex.main=1.4)
+mtext("", 3, line=-2,cex=1.3, at=1.5)
+polygon(c(rev(pred_ln_size), pred_ln_size), c(rev(preds[ ,3]), preds[ ,2]), col = 'mistyrose2', border = NA)
+points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
+points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
+lines(pred_ln_size, preds[,1],col="red", lw=2)
 
 
+# compile Table S1
+pred<- predict(m0, newdata = weight_data, type="response")
+weight_data$m0_pred <- exp(pred)
+pred<- predict(m1, newdata = weight_data, type="response")
+weight_data$m1_pred <- exp(pred)
+pred<- predict(m1r, newdata = weight_data, re.form=NA)
+weight_data$m1r_pred <- exp(pred)
+pred<- predict(m2, newdata = weight_data, type="response")
+weight_data$m2_pred <- exp(pred)
 
+colnames(weight_data)
+appendix_table <- weight_data[,c(6,1,13,12)]
+appendix_table$dataset <- "training"
+appendix_table$m_Szyszko <- round(szyszko_weight(weight_data$av_size_mm), digits = 2)
+appendix_table$m_Booij <- round(booij_weight(weight_data$av_size_mm), digits = 2)
+appendix_table$m_base <- round(weight_data$m0_pred, digits = 2)
+appendix_table$m_fixed <- round(weight_data$m1_pred, digits = 2)
+appendix_table$m_mixed <- round(weight_data$m1r_pred, digits = 2)
+appendix_table$m_inter <- round(weight_data$m2_pred, digits = 2)
 
-# data table for supporting information
+pred<- predict(m0, newdata = weight_data, type="response")
+weight_data$m0_pred <- exp(pred)
 
-# predict beetle weights with different models (without CV)
-pred<- predict(m0, newdata = weights_clean2, type="response")
-weights_clean2$m0_pred <- exp(pred)
+pred<- predict(m1r, newdata = weight_data, re.form=NA)
+weight_data$m1r_pred <- exp(pred)
 
-pred<- predict(m1, newdata = weights_clean2, type="response")
-weights_clean2$m1_pred <- exp(pred)
+colnames(weight_data)
+appendix_table2 <- weight_data[,c(6,1,13,12)]
+appendix_table2$dataset <- "training"
+appendix_table2$m_Szyszko <- round(szyszko_weight(weight_data$av_size_mm), digits = 2)
+appendix_table2$m_Booij <- round(booij_weight(weight_data$av_size_mm), digits = 2)
+appendix_table2$m_base <- round(weight_data$m0_pred, digits = 2)
+appendix_table2$m_fixed <- NA
+appendix_table2$m_mixed <- round(weight_data$m1r_pred, digits = 2)
+appendix_table2$m_inter <- NA
 
-pred<- predict(m1r, newdata = weights_clean2, re.form=NA)
-weights_clean2$m1r_pred <- exp(pred)
+appendix_table <- rbind(appendix_table,appendix_table2)
 
-pred<- predict(m2, newdata = weights_clean2, type="response")
-weights_clean2$m2_pred <- exp(pred)
-
-
-appendix_table <- weights_clean2[,c(6,1,13,12,22,23,24:27)]
-appendix_table$syszko_weight <- round(appendix_table$syszko_weight, digits = 2)
-appendix_table$booij_weight <- round(appendix_table$booij_weight, digits = 2)
-appendix_table$m0_pred <- round(appendix_table$m0_pred, digits = 2)
-appendix_table$m1_pred <- round(appendix_table$m1_pred, digits = 2)
-appendix_table$m1r_pred <- round(appendix_table$m1r_pred, digits = 2)
-appendix_table$m2_pred <- round(appendix_table$m2_pred, digits = 2)
+appendix_table$dataset[appendix_table$source_weight == "schultz"]<- "validation"
+exclude_subfamily <- c("Omophroninae", "Loricerinae", "Broscinae", "Cicindelinae")
+appendix_table$dataset[appendix_table$subfamily %in% exclude_subfamily] <- "excluded"
+colnames(species_double)
+appendix_table$double[appendix_table$species %in% species_double & appendix_table$source_weight == "schultz"] <- "double"
 
 appendix_table$source_weight[appendix_table$source_weight == "schultz"] <- "1)"
 appendix_table$source_weight[appendix_table$source_weight == "booij"] <- "2)"
 appendix_table$source_seize[appendix_table$source_seize == "booij"] <- "2)"
 appendix_table$source_seize[appendix_table$source_seize == "freude"] <- "3)"
 
-write_xlsx(appendix_table,"C:/Users/fweiss/Promotion/PhD - own research/projects/Biomasse/data/appendix_data.xlsx")
-
-
-
-
-
+write_xlsx(appendix_table,"Table_S1")
