@@ -1,5 +1,5 @@
 # carabid_biomass
-supplementary material to: How to estimate carabid biomass - An evaluation of different size-weight models for ground-beetles (Coleoptera:Carabidae) and a proposition for further improvement.
+supplementary material to: How to estimate carabid biomass? – An valuation of size-weight models for ground beetles (Coleoptera: Carabidae) and perspectives for further improvement
 
 Authors
 Fabio Weiss(https://orcid.org/0000-0003-1078-1528), 
