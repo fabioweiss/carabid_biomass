@@ -1,13 +1,15 @@
-# Supplementary code to:
+# Supplementary R code to:
 
-# How to estimate carabid biomass? – An valuation of size-weight models for ground beetles (Coleoptera: Carabidae) and perspectives for further improvement
+# Weiss, F., Linde, A. (2022)
+# How to estimate carabid biomass?—an evaluation of size-weight models for ground beetles (Coleoptera: Carabidae) and perspectives for further improvement. 
+# Journal of Insect Conservation
+# https://doi.org/10.1007/s10841-022-00391-6 
 
-# submitted to Journal of Insect Conservation
-# Fabio Weiss, Andreas Linde
 # University for Sustainable Development Eberswalde, fabio.weiss@hnee.de
 
-# compiled with R version 4.1.2. 
-
+# R version 4.1.2 (2021-11-01) -- "Bird Hippie"
+# Copyright (C) 2021 The R Foundation for Statistical Computing
+# Platform: x86_64-w64-mingw32/x64 (64-bit)
 
 # Packagelist
 library(lme4)
@@ -25,6 +27,24 @@ library(multcomp)
 # load assembled table
 weight_data <- read.csv2("compiled_data.csv")
 
+str(weight_data)
+'data.frame':	264 obs. of  14 variables:
+ $ subfamily    : chr  "Harpalinae" "Harpalinae" "Harpalinae" "Harpalinae" ...
+ $ tribe        : chr  "Harpalini" "Harpalini" "Harpalini" "Harpalini" ...
+ $ subtribe     : chr  "Stenolophina " "Stenolophina " "Stenolophina " "Stenolophina " ...
+ $ genus        : chr  "Acupalpus" "Acupalpus" "Acupalpus" "Acupalpus" ...
+ $ subgenus     : chr  "" "" "" "" ...
+ $ species      : chr  "Acupalpus flavicollis" "Acupalpus meridianus" "Agonum albipennis" "Agonum dolens" ...
+ $ species_alt  : chr  "" "" "" "" ...
+ $ max_size_mm  : num  NA NA NA NA NA NA NA NA NA NA ...
+ $ min_size_mm  : num  NA NA NA NA NA NA NA NA NA NA ...
+ $ av_size_mm   : num  3.36 3.7 7.6 6.6 6.93 6.58 9.21 6.45 7.42 7.62 ...
+ $ weight_mg    : num  1.75 2.05 16.57 14.6 15.3 ...
+ $ source_seize : chr  "booij" "booij" "booij" "booij" ...
+ $ source_weight: chr  "booij" "booij" "booij" "booij" ...
+ $ method       : chr  "live_catch" "live_catch" "live_catch" "live_catch" ...
+
+
 # data can be found here: 
 # Schultz, R. (1996) Die Laufkäfer als Indikatoren der Renaturierung des Salzgrünlandes im Ostseebereich Vorpommerns. Culliver-Verlag, Göttingen.
 # Booij, K., den Nijs, L., Heijermann, T., Jorritsma, I., Lock, C., Noorlander, J. (1994) Size and weight of carabid beetles: ecological applications. Proc Exper Appl Entomol.
@@ -37,7 +57,7 @@ exclude_subfamily <- c("Omophroninae", "Loricerinae", "Broscinae", "Cicindelinae
 weight_data2 <- weight_data[!(weight_data$subfamily %in% exclude_subfamily) ,]
 weight_data$subfamily <- as.factor(weight_data$subfamily)
 
-#figure 1
+# Fig 1
 par(mfrow= c(1,2))
 plot(weight_data$weight_mg ~ weight_data$av_size_mm, pch=20, main= "a", ylab="weight (mg)", xlab="body length (mm)", col="grey",cex.lab=1.4, cex.axis=1.1, cex=1.2)
 pred_size <- seq(min(weight_data$av_size_mm), max(weight_data$av_size_mm), length.out = 100)
@@ -49,10 +69,11 @@ pred_ln_size <- log(pred_size)
 lines(pred_ln_size, log(szyszko_weight(pred_size)),lty="dotted", lw=2)
 lines(pred_ln_size, log(booij_weight(pred_size)),lty="twodash", lw=2)
 
+# separate data by source
 weights_booij <- weight_data[weight_data$source_weight == "booij",]
 weights_schultz <- weight_data[weight_data$source_weight == "schultz",]
 
-# figure 2
+# Fig 2
 par(mfrow= c(2,2))
 hist(weights_booij$av_size_mm, breaks=c(1:35), main= "Data of Booij et al. (1994), (training set)", ylim = c(0,25), xlab= "body length (mm)",cex.lab=1.4, cex.axis=1.4, cex.main=1.3)
 plot(weights_booij$av_size_mm, weights_booij$weight_mg, ylab="weight (mg)", xlab = "body length (mm)", ylim= c(0,900), xlim = c(0,35),cex.lab=1.4, cex.axis=1.4)
@@ -68,6 +89,7 @@ m1r <-lmer(ln_weight ~ ln_size + (1|subfamily), weights_booij, REML = F)
 m2 <- lm(ln_weight ~ ln_size * subfamily, data= weights_booij)
 # in the manuscript the models are referred to as m_base, m_fixed, m_mixed, m_inter (in this order)
 
+# Table 2
 tab_model(m0,m1,m1r,m2, dv.labels= c("m_base","m_fixed","m_mixed","m_inter"), show.df=T, show.dev=T, digits = 4)
 
 # Diagnostics with DHARMa package
@@ -131,7 +153,7 @@ weights_schultz$m1r_off <- (weights_schultz$m1r_pred - weights_schultz$weight_mg
 
 weights_schultz$m2_off <- (weights_schultz$m2_pred - weights_schultz$weight_mg)/weights_schultz$weight_mg *100
 
-# Figure 3, relative deviation graphs (sensu Mitchell, 1997)
+# Fig 3, relative deviation graphs (sensu Mitchell, 1997)
 par(mfrow= c(3,2))
 
 plot(weights_schultz$szyszko_off ~ weights_schultz$av_size_mm,ylim=c(-70,220), ylab= "", xlab="",pch=20, cex.lab=1.5, cex=1.5, cex.axis=1.5, cex.main=1.2)
@@ -218,7 +240,7 @@ log_err_mod <- lm(ln_obs_weight ~ ln_pred_weight * model, data=resids_data)
 resids <- simulateResiduals(fittedModel = log_err_mod, plot=T)
 plotQQunif(resids)
 
-# Figure 4
+# Fig 4
 ref_data <- resids_data[resids_data$model== "reference",]
 par(mfrow= c(6,2))
 
@@ -445,7 +467,7 @@ pred_elaphrinae <- data.frame(ln_size=pred_ln_size, subfamily=pred_elaphrinae)
 pred_nebriinae <-data.frame(ln_size=pred_ln_size, subfamily=pred_nebriinae)
 
 
-# figure S1
+# Fig S1
 par(mfrow= c(1,2))
 preds<- predict(m0, newdata = pred_harpalinae, interval = "confidence")
 
@@ -463,7 +485,7 @@ points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
 points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
 lines(pred_ln_size, preds[,1],col="red", lw=2)
 
-# figure S2
+# Fig S2
 par(mfrow= c(6,2))
 preds<- predict(m1, newdata = pred_harpalinae, interval = "confidence")
 
@@ -561,7 +583,7 @@ points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
 points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
 lines(pred_ln_size, preds[,1],col="red", lw=2)
 
-# figure S3
+# Fig S3
 par(mfrow= c(2,1))
 preds<- predict(m1r, newdata = pred_harpalinae, re.form=NA)
 
@@ -577,7 +599,7 @@ points(weights_schultz$ln_weight ~ weights_schultz$ln_size, pch=20, cex=0.8)
 points(weights_booij$ln_weight ~ weights_booij$ln_size, pch=20, cex=0.8)
 lines(pred_ln_size, preds,col="red", lw=2)
 
-# figure S4
+# Fig S4
 par(mfrow= c(6,2))
 preds<- predict(m2, newdata = pred_harpalinae, interval = "confidence")
 
