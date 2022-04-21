@@ -1,9 +1,7 @@
 # carabid_biomass
-supplementary material to: How to estimate carabid biomass? – An valuation of size-weight models for ground beetles (Coleoptera: Carabidae) and perspectives for further improvement
+supplementary material to: 
 
-Authors
-Fabio Weiss(https://orcid.org/0000-0003-1078-1528), 
-Andreas Linde(https://orcid.org/0000-0002-0230-7722) 
+Weiss, F., Linde, A. (2022). How to estimate carabid biomass?—an evaluation of size-weight models for ground beetles (Coleoptera: Carabidae) and perspectives for further improvement. Journal of Insect Conservation. https://doi.org/10.1007/s10841-022-00391-6 ) 
 
 University for Sustainable Development Eberswalde
 Schicklerstr. 5, 16225 Eberswalde, Germany
